@@ -6,6 +6,15 @@ let g:autoloaded_copilot = 1
 scriptencoding utf-8
 
 let s:has_ghost_text = has('nvim-0.6') && exists('*nvim_buf_get_mark')
+let s:popup_win = popup_create('', #{
+      \ line: 0,
+      \ col: 0,
+      \ hidden: 1,
+      \ zindex: 200,
+      \ border: [0, 0, 0, 0],
+      \ padding: [0, 0, 0, 0],
+      \ mapping: 0,
+      \})
 
 let s:hlgroup = 'CopilotSuggestion'
 
@@ -331,6 +340,8 @@ endfunction
 function! s:ClearPreview() abort
   if exists('*nvim_buf_del_extmark')
     call nvim_buf_del_extmark(0, copilot#NvimNs(), 1)
+  else
+    call popup_hide(s:popup_win)
   endif
 endfunction
 
@@ -364,8 +375,17 @@ function! s:UpdatePreview() abort
       let data.virt_text += annot
     endif
     let data.hl_mode = 'combine'
-    call nvim_buf_del_extmark(0, copilot#NvimNs(), 1)
-    call nvim_buf_set_extmark(0, copilot#NvimNs(), line('.')-1, col('.')-1, data)
+    if s:has_ghost_text
+      call nvim_buf_del_extmark(0, copilot#NvimNs(), 1)
+      call nvim_buf_set_extmark(0, copilot#NvimNs(), line('.')-1, col('.')-1, data)
+    else
+      call popup_setoptions(s:popup_win, #{
+      \ line: winline(),
+      \ col: 1 + (&number ? 1 : 0) + (&signcolumn == 'yes' || (&signcolumn == 'auto' && sign_getplaced()) ? 2 : 0),
+      \})
+      call setwinvar(s:popup_win, '&wincolor', 'Normal')
+      call popup_show(s:popup_win)
+    endif
     if uuid !=# get(s:, 'uuid', '')
       let s:uuid = uuid
       call copilot#Request('notifyShown', {'uuid': uuid})
@@ -420,7 +440,7 @@ function! copilot#OnInsertEnter() abort
   let s:is_mapped = copilot#IsMapped()
   let s:dest = bufnr('^copilot://$')
   if s:dest < 0 && !s:has_ghost_text
-    let s:dest = 0
+    let s:dest = winbufnr(s:popup_win)
   endif
   return copilot#Schedule()
 endfunction
@@ -519,9 +539,7 @@ endfunction
 
 function! s:EnabledStatusMessage() abort
   let buf_disabled = s:BufferDisabled()
-  if !s:has_ghost_text && bufwinid('copilot://') == -1
-    return "Neovim 0.6 required to support ghost text"
-  elseif !copilot#IsMapped()
+  if !copilot#IsMapped()
     return '<Tab> map has been disabled or is claimed by another plugin'
   elseif !get(g:, 'copilot_enabled', 1)
     return 'Disabled globally by :Copilot disable'
